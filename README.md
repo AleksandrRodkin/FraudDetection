@@ -25,7 +25,6 @@ The dataset contains realistic and meaningful (non-encoded) features, enabling b
 │   │   ├── __init__.py
 │   │   └── schemas.py
 │   ├── application.py            # FastAPI app entry point
-│   ├── .env.example              # example .env file
 │   ├── __init__.py
 │   └── logger_config.py
 ├── data
@@ -33,6 +32,8 @@ The dataset contains realistic and meaningful (non-encoded) features, enabling b
 │   │   └── account_fraud.csv     # Original dataset
 │   └── EDA
 │       └── Fraud_EDA.ipynb       # Exploratory Data Analysis
+├── .env.example                  # example .env file
+├── docker-compose.yml
 ├── Dockerfile
 ├── poetry.lock
 ├── pyproject.toml
@@ -83,30 +84,32 @@ The dataset contains realistic and meaningful (non-encoded) features, enabling b
 
 ### Create an .env file
 
-Create an .env file in the api directory for example  based on the provided api/.env.example:
+Create an .env file in the project directory for example based on the provided .env.example file:
 ```bash
-cp api/.env.example api/.env
+cp .env.example .env
 ```
 
 The file contains database connection settings (for example):
 ```bash
-DB_HOST=host.docker.internal
+DB_HOST=db
 DB_PORT=5432
 DB_NAME=fraud_detection
-DB_PASSWORD=postgres
 DB_USER=postgres
+DB_PASSWORD=postgres
 ```
 
-### Build the image
+### Build and run the containers
 ```bash
-docker build -t fraud_detection-api:latest .
+docker compose up --build
 ```
-### Run the container
+This command will:
+- create a PostgreSQL container (db)
+- create the API container (api)
+- automatically create the database on the first run
+
+To stop the containers:
 ```bash
-docker run -p 8000:8000 \
---add-host=host.docker.internal:host-gateway \
---env-file api/.env \
-fraud_detection-api:latest
+docker compose down
 ```
 ### Connect to the app
 The API will be available at:

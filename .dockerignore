@@ -16,5 +16,5 @@ training/optuna/*
 /.idea/
 **/__pycache__/
 logs/
-/api/.env
+/.env
 requirements.txt

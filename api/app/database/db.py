@@ -46,12 +46,19 @@ async def ensure_database_exists(db=DATABASE_URL):
             "SELECT 1 FROM pg_database WHERE datname = $1",
             db_name
         )
-        if db_exists:
-            return True
-        else:
+        if not db_exists:
             await conn.execute(f'CREATE DATABASE "{db_name}"')
             log.info("Database created")
-            return False
+
+        else:
+            tables = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public')"
+            )
+            if tables:
+                return True
+            else:
+                return False
+
     finally:
         await conn.close()
 

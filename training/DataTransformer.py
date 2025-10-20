@@ -7,7 +7,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.metrics import roc_curve
 from sklearn.model_selection import BaseCrossValidator
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, TargetEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, TargetEncoder, StandardScaler, RobustScaler
 from sklearn.utils.validation import check_is_fitted
 
 
@@ -42,7 +42,10 @@ class NoneHandler(BaseEstimator, TransformerMixin):
     """
 
     def __init__(self):
-        self.handler_params = {'prev_address_months_count': -1,
+        self.base_mode = 'mode'
+        self.base_mode_numeric = 'median'
+        self.max_missing_prop = 0.15
+        self.handler_params = {'prev_address_months_count': 'median',
                                'current_address_months_count': 0,
                                'bank_months_count': 0,
                                'device_distinct_emails_8w': 0,
@@ -55,43 +58,62 @@ class NoneHandler(BaseEstimator, TransformerMixin):
                              'prev_address_months_count', 'intended_balcon_amount', 'bank_months_count',
                              'device_fraud_count',
                              'date_of_birth_distinct_emails_4w', 'velocity_4w', 'zip_count_4w']
+        self.computed_values_ = dict()
+        self.missing_indicators_ = dict()
+
+    def _compute_value(self, series, mode):
+        "Compute the values to replace missing values"
+        clean_values = series.loc[series != -1].dropna()
+        if mode == "median":
+            return clean_values.median()
+        elif mode == "mean":
+            return clean_values.mean()
+        elif mode == "mode":
+            return clean_values.mode().iloc[0] if not clean_values.empty else np.nan
+        else:
+            raise ValueError(f"{mode} not in ['median', 'mean', 'mode']")
 
     def fit(self, X, y=None):
+        X = X.copy()
+        if 'intended_balcon_amount' in X.columns:
+            X.loc[X.intended_balcon_amount < 0, 'intended_balcon_amount'] = -1
+
+        for col in X.columns:
+            self.missing_indicators_[col] = ((X[col] == -1) | (X[col].isna())).mean() > self.max_missing_prop
+
+            if col in self.handler_params:
+                rule = self.handler_params[col]
+                if isinstance(rule, str):  # median/mean/mode
+                    self.computed_values_[col] = self._compute_value(X[col], rule)
+                elif rule is not None:  # fixed value
+                    self.computed_values_[col] = rule
+                # if None → skip
+            else:
+                # use base_modes
+                if col in self.num_features:
+                    self.computed_values_[col] = self._compute_value(X[col], self.base_mode_numeric)
+                else:
+                    self.computed_values_[col] = self._compute_value(X[col], self.base_mode)
         self._is_fitted = True
         return self
 
     def transform(self, X, y=None):
         check_is_fitted(self)
         X = X.copy()
-
-        for column in X.columns:
-            if np.sum(X[column] == -1):
-                if column in self.handler_params:
-                    if self.handler_params.get(column, None) is None:
-                        continue
-                    else:
-                        X.loc[X[column] == -1, column] = self.handler_params[column]
-                else:
-                    if column in self.num_features:
-                        X.loc[X[column] == -1, column] = X[column].median()
-                    else:
-                        X.loc[X[column] == -1, column] = X[column].mode().item()
-
-            if X[column].isna().any():
-                if column in self.handler_params:
-                    if self.handler_params.get(column, None) is None:
-                        continue
-                    else:
-                        X.loc[X[column].isna(), column] = self.handler_params[column]
-                else:
-                    if column in self.num_features:
-                        X.loc[X[column].isna(), column] = X[column].median()
-                    else:
-                        X.loc[X[column].isna(), column] = X[column].mode().item()
-
         if 'intended_balcon_amount' in X.columns:
             X.loc[X.intended_balcon_amount < 0, 'intended_balcon_amount'] = -1
+        for col in X.columns:
+            if col in self.handler_params and self.handler_params[col] is None:
+                continue
+            elif col not in self.computed_values_:
+                continue
+            else:
+                replacement = self.computed_values_[col]
+                missing_mask = (X[col] == -1) | (X[col].isna())
 
+                if self.missing_indicators_.get(col, False):
+                    X[f"{col}_miss"] = missing_mask.astype(int)
+                X.loc[missing_mask, col] = replacement
         return X
 
     def __sklearn_is_fitted__(self):
@@ -150,7 +172,7 @@ class DataHandler(BaseEstimator, TransformerMixin):
 class DataPreprocessor(BaseEstimator, TransformerMixin):
     """
     Custom class for feature selection, adding features based on functions and PCA,
-    applying ColumnTransformer (StandardScaler, OHE, MTE).
+    applying ColumnTransformer (Scaler, OHE, MTE).
     """
 
     def __init__(self,
@@ -160,6 +182,7 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
                  pca_n_components=None,
                  custom_functions=None,
                  num_ohe_mte_threshold=5,
+                 scaler=RobustScaler()
                  ):
         self.cat_features = cat_features
         self.num_features = num_features
@@ -167,6 +190,7 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
         self.pca_n_components = pca_n_components
         self.custom_functions = custom_functions
         self.num_ohe_mte_threshold = num_ohe_mte_threshold
+        self.scaler = scaler
 
     def fit(self, X, y=None):
         X = X.copy()
@@ -292,7 +316,7 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
         self.mte_features = [x for x in self._cat_features if X[x].nunique() >= self.num_ohe_mte_threshold]
 
         num_transformer = Pipeline([
-            ('scaler', StandardScaler())
+            ('scaler', self.scaler)
         ])
 
         most_frequent = [X[col].value_counts().idxmax() for col in self.ohe_features]

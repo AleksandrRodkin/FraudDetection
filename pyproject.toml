@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "frauddetection"
-version = "0.1.0"
+version = "0.1.1"
 description = "Fraud detection for bank account application"
 authors = ["Aleksandr Rodkin <alekserod@gmail.com>"]
 readme = "README.md"

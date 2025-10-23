@@ -1,4 +1,4 @@
-# Fraud Detection API — Bank Account Application Classification
+# Bank Account Fraud Detection API
 
 ## Overview
 In today’s world, fraud in the financial sector remains one of the most pressing issues.  
@@ -13,70 +13,116 @@ The dataset contains realistic and meaningful (non-encoded) features, enabling b
 ```
 ├── api
 │   ├── app
-│   │   ├── database
-│   │   │   ├── db.py
-│   │   │   ├── __init__.py
-│   │   │   ├── models.py
-│   │   │   └── requests.py
-│   │   ├── estimator
-│   │   │   └── model.pkl         # Trained model
 │   │   ├── config
 │   │   │   └── conf.py           # Getting keys from .env
+│   │   ├── database              # Creating PostgresDB with SQLAlchemy
+│   │   │   ├── __init__.py 
+│   │   │   ├── db.py             # Creating a connection to the database
+│   │   │   ├── models.py         # Describing DB tables
+│   │   │   └── requests.py       # Describing DB requests
+│   │   ├── estimator
+│   │   │   └── model.pkl         # Final trained model
 │   │   ├── __init__.py
-│   │   └── schemas.py
-│   ├── application.py            # FastAPI app entry point
+│   │   └── schemas.py            # Describing pydantic schemas for data validation
 │   ├── __init__.py
-│   └── logger_config.py
+│   ├── application.py            # FastAPI app entry point 
+│   └── logger_config.py          # Loguru configuration
 ├── data
 │   ├── Bank Account Fraud Dataset
 │   │   └── account_fraud.csv     # Original dataset
 │   └── EDA
-│       └── Fraud_EDA.ipynb       # Exploratory Data Analysis
-├── .env.example                  # example .env file
+│       └── Fraud_EDA.ipynb       # Exploratory Data Analysis Notebook
+├── training
+│   ├── optuna
+│   │   └── optuna_study.db        # Optuna study database for hyperparameter tuning results
+│   ├── __init__.py
+│   ├── dataleakage.ipynb          # Experiment with data leakage (not for production)
+│   ├── DataTransformer.py         # Data preprocessing classes
+│   ├── save_final_model.py        # Script for saving the model as a pickle file
+│   └── training.ipynb             # Model training & tuning
+├── .dockerignore
+├── .env.example                   # example .env file
+├── .gitattributes
+├── .gitignore
 ├── docker-compose.yml
 ├── Dockerfile
+├── LICENSE
 ├── poetry.lock
 ├── pyproject.toml
-├── README.md
-└── training
-    ├── dataleakage.ipynb          # Experiment with data leakage (not for production)
-    ├── DataTransformer.py         # Data preprocessing classes
-    ├── __init__.py
-    ├── optuna
-    │   └── optuna_study.db
-    └── training.ipynb             # Model training & tuning
+└── README.md
 ```
 
 ---
 
 ## EDA & Feature Engineering Summary
-- **Train/test split**: Months 6–7 → test (80/20 split)
-- **Target imbalance**: Fraud cases ≈ 1% of data
+*See `data/EDA/Fraud_EDA.ipynb` for full details*
+- **Train/test split**: 
+  - Months 6–7 used for testing (80/20 split)
+- **Target imbalance**: 
+  - Fraud cases account for approximately 1% of data
 - **Removed constant/irrelevant features**:
-  - `device_fraud_count` (handled outside the model — if >0, classify as fraud)
+  - `device_fraud_count` - handled outside the model (if > 0, classify as fraud)
   - `zip_count_4w`, `source`, `bank_months_count`, `minutes_since_request`
 - **Feature transformations**:
   - `proposed_credit_limit` converted to categorical (3 bins)
   - Rare categories merged into `Other`
-- **Feature selection**: Correlation analysis, mutual information, feature importance
+- **Feature selection**: 
+  - Based on correlation analysis, mutual information, feature importance scores
 
 ---
 
 ## Model Training Summary
-- **Main metric**: Recall@5% FPR  
-  (Maximize fraud detection while keeping false positives ≤ 5%)
+*See `training/training.ipynb` for full details*
+- **Main metric**: Recall@5% FPR (Recall at a fixed 5% False Positive Rate)
+  (maximize fraud detection while keeping false positives ≤ 5%)
 - **Approach**:
-  - Train baseline model
-  - Train advanced models (RandomForest, XGBoost)
-  - Time Series cross-validation by `Month`
-  - Select 2 best models → perform paired statistical test
-  - Final model: **XGBoost** (with Platt probability calibration)
+  - Built a reproducible end-to-end ML pipeline for data preprocessing, 
+    feature engineering, and model training
+  - Trained baseline models (Logistic Regression, LinearSVC)
+  - Trained advanced models (RandomForest, XGBoost)
+  - Applied Time Series cross-validation split by feature `Month`
+  - Used SMOTE and NearMiss to rebalance the training set and increase the share of positive samples
+  - Tuned hyperparameters with optuna
+  - Selected the two best models and performed a paired statistical test for model selection
+  - Chose the final model: **XGBoost** (with Platt scaling for probability calibration)
 - **Post-processing**:
-  - Model wrapper to enforce ≈5% FPR threshold
-  - Special handling for `device_fraud_count > 0`
-- **Model performance on test sample:**
-  - ROC-AUC: 0.893
-  - Recall@5% FPR: 0.555
+  - Implemented a model wrapper to enforce ≈5% FPR threshold
+  - Added a special handling for records with `device_fraud_count > 0`
+- **Model performance (test set):**
+  - Recall@5% FPR: 0.545
+  - PR-AUC: 0.192
+  - ROC-AUC: 0.894
+  - *Note*: These results are competitive. Higher scores reported in some Kaggle notebooks are often due to data leakage
+  (the test set was evaluated after applying rebalancing). See `training/dataleakage.ipynb` for a demonstration.
+
+---
+
+## API Development Summary
+*To provide access to the ML model, a simple API was implemented. See files in the `api` folder for full details*
+
+- Architecture:
+  - FastAPI backend with async support for high-performance requests
+  - PostgreSQL database with SQLAlchemy ORM for storing structured application data
+  - For demonstration purposes, the database is automatically initialized and optionally filled from a CSV file. 
+  Data is stored in normalized tables: `Customer`, `Address`, `Application`, `Device`, `ApplicationMetrics`
+  - Tables are created via SQLAlchemy model definitions
+  - Asynchronous database session management is handled using `async_sessionmaker`
+
+- Implemented Endpoints:
+  - `GET /`: Redirects to API documentation (generated with FastAPI)
+  - `GET /check_fraud_id`: Checks fraud by application ID from the database. Data is fetched via SQLAlchemy
+  - `POST /check_fraud_json`: Checks fraud using JSON input. Input data is validated using Pydantic models
+
+- Predictions:
+  - The ML model is loaded from a pickle file when the API starts
+  - The system checks whether the model supports the `predict_proba` method
+  - Supports both class prediction and probability prediction (if `predict_proba` is available)
+  - Prediction results are returned in the format `{application_id: {fraud_indicator, fraud_probability}}`
+  - Multiple applications can be checked at once, either by ID or via JSON input
+  - Input and output validation is handled via Pydantic models
+
+- Logging:
+  - Uses `loguru` for logging startup events, database operations, and prediction requests
 
 ---
 
@@ -161,11 +207,11 @@ GET http://0.0.0.0:8000/check_fraud_id?application_id=6&application_id=8&return_
 {
     "6": {
         "fraud_indicator": 0,
-        "fraud_probability": 0.0015127136139199138
+        "fraud_probability": 0.0014499817043542862
     },
     "8": {
         "fraud_indicator": 1,
-        "fraud_probability": 0.06025437265634537
+        "fraud_probability": 0.061979230493307114
     }
 }
 ```

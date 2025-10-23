@@ -64,7 +64,7 @@ async def ensure_database_exists(db=DATABASE_URL):
 
 
 async def init_db():
-    """Initializes the database by creating all tables specified in the Base metadata."""
+    """Initializes the database by creating all tables specified in the Base metadata"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         log.info("Connection to the database established")
